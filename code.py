@@ -5,8 +5,7 @@ import os
 from datetime import datetime
 import pandas as pd
 
-# --- CONFIGURATION ---
-# Access key from Secrets (Best Practice) or fall back to hardcoded for local test
+
 try:
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 except:
@@ -17,7 +16,7 @@ ADMIN_PASSWORD = "admin123"
 LEADS_DB_FILE = "leads_db.json"
 USERS_DB_FILE = "users_db.json"
 
-# --- BACKEND: DATA MANAGEMENT ---
+
 
 def load_json(filename):
     if not os.path.exists(filename): return []
@@ -28,7 +27,7 @@ def load_json(filename):
 def save_json(filename, data):
     with open(filename, "w") as f: json.dump(data, f, indent=4)
 
-# --- BACKEND: AUTHENTICATION ---
+
 
 def register_user(name, email, password):
     users = load_json(USERS_DB_FILE)
@@ -45,12 +44,13 @@ def authenticate_user(email, password):
     user = next((u for u in users if u['email'] == email and u['password'] == password), None)
     return user
 
-# --- BACKEND: AI LOGIC ---
+
+
+import re  # Add this import at the top of your file if not present
 
 def classify_lead_with_ai(name, message):
     url = "https://api.groq.com/openai/v1/chat/completions"
     
-    # Check for valid key
     if not GROQ_API_KEY or "YOUR_API_KEY" in GROQ_API_KEY:
         return fallback_logic(message)
 
@@ -68,7 +68,7 @@ def classify_lead_with_ai(name, message):
 
     INSTRUCTIONS:
     1. Calculate cost for EACH item found.
-    2. Return JSON ONLY.
+    2. OUTPUT RAW JSON ONLY. NO MARKDOWN. NO INTRO/OUTRO TEXT.
     3. "reasoning" MUST be a short calculation summary (e.g. "1000sqft * 100 = 1L"). 
     4. "estimated_quote" MUST be the final formatted string (e.g. "₹1.2 Lakhs").
 
@@ -90,9 +90,22 @@ def classify_lead_with_ai(name, message):
             json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
         )
         if response.status_code != 200: return fallback_logic(message)
+        
         content = response.json()['choices'][0]['message']['content']
-        return content.replace("```json", "").replace("```", "").strip()
-    except: return fallback_logic(message)
+        
+        # --- ROBUST JSON EXTRACTION ---
+        # This regex looks for the first '{' and the last '}' and ignores everything else
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            return clean_json
+        else:
+            # If regex fails, try basic cleanup
+            return content.replace("```json", "").replace("```", "").strip()
+
+    except Exception as e:
+        print(f"Error: {e}") # Log error for debugging
+        return fallback_logic(message)
 
 def fallback_logic(message):
     return json.dumps({
@@ -101,7 +114,7 @@ def fallback_logic(message):
         "email_subject": "Inquiry Received", "email_body": "We will contact you shortly."
     })
 
-# --- FRONTEND SETUP ---
+
 st.set_page_config(page_title="Material AI Portal", page_icon="🏗️", layout="wide")
 
 if 'page' not in st.session_state: st.session_state.page = 'home'
@@ -110,9 +123,7 @@ if 'user' not in st.session_state: st.session_state.user = None
 def nav_to(page): st.session_state.page = page
 def logout(): st.session_state.user = None; st.session_state.page = 'home'
 
-# ==========================================
-# 1. HOME
-# ==========================================
+
 if st.session_state.page == 'home':
     st.title("🏗️ Material Solutions AI")
     st.write("Intelligent Quotes & Lead Management")
@@ -124,9 +135,7 @@ if st.session_state.page == 'home':
     with c3:
         if st.button("🔐 Admin Access", use_container_width=True): nav_to('admin_login')
 
-# ==========================================
-# 2. AUTH
-# ==========================================
+
 elif st.session_state.page == 'login':
     st.button("← Back", on_click=lambda: nav_to('home'))
     st.title("Login")
@@ -154,9 +163,7 @@ elif st.session_state.page == 'register':
             if success: st.success(msg)
             else: st.error(msg)
 
-# ==========================================
-# 3. USER DASHBOARD
-# ==========================================
+
 elif st.session_state.page == 'user_dashboard':
     if not st.session_state.user: nav_to('home'); st.rerun()
     
@@ -167,7 +174,7 @@ elif st.session_state.page == 'user_dashboard':
     st.title("👤 Customer Portal")
     tab1, tab2 = st.tabs(["📝 New Inquiry", "💬 My Quotes & Chat"])
 
-    # NEW INQUIRY
+   
     with tab1:
         with st.form("new_lead"):
             message = st.text_area("Requirements", height=100)
@@ -193,7 +200,6 @@ elif st.session_state.page == 'user_dashboard':
                     save_json(LEADS_DB_FILE, leads)
                     st.success("Inquiry Sent! Check 'My Quotes' tab."); st.rerun()
 
-    # MY QUOTES & CHAT
     with tab2:
         all_leads = load_json(LEADS_DB_FILE)
         my_leads = [l for l in all_leads if l['email'] == st.session_state.user['email']]
@@ -203,7 +209,7 @@ elif st.session_state.page == 'user_dashboard':
         for lead in reversed(my_leads):
             with st.expander(f"{lead['timestamp']} | {lead['category']}", expanded=True):
                 
-                # --- UPDATED UI: USE METRICS FOR BETTER VISIBILITY ---
+               
                 c_price, c_status, c_act = st.columns([1.5, 1, 1.5])
                 
                 with c_price:
@@ -231,7 +237,7 @@ elif st.session_state.page == 'user_dashboard':
                 st.divider()
                 st.subheader("💬 Message Admin")
                 
-                # Chat History
+             
                 chat_box = st.container(height=300)
                 with chat_box:
                     for msg in lead.get('chat_history', []):
@@ -240,7 +246,7 @@ elif st.session_state.page == 'user_dashboard':
                         with st.chat_message(role, avatar=av):
                             st.write(msg['content'])
 
-                # Chat Input
+           
                 with st.form(key=f"user_chat_{lead['id']}", clear_on_submit=True):
                     user_msg = st.text_input("Type your message...")
                     if st.form_submit_button("Send"):
@@ -252,9 +258,7 @@ elif st.session_state.page == 'user_dashboard':
                             save_json(LEADS_DB_FILE, all_leads)
                             st.rerun()
 
-# ==========================================
-# 4. ADMIN DASHBOARD
-# ==========================================
+
 elif st.session_state.page == 'admin_login':
     st.button("← Home", on_click=lambda: nav_to('home'))
     st.title("🔐 Admin Login")
@@ -292,7 +296,6 @@ elif st.session_state.page == 'admin_dashboard':
                 with col_chat:
                     st.subheader("💬 Chat & Update")
                     
-                    # Chat History
                     chat_box = st.container(height=250)
                     with chat_box:
                         for msg in lead.get('chat_history', []):
@@ -301,9 +304,8 @@ elif st.session_state.page == 'admin_dashboard':
                             with st.chat_message(role, avatar=av):
                                 st.write(msg['content'])
 
-                    # Reply & Update
                     with st.form(key=f"adm_reply_{lead['id']}", clear_on_submit=True):
-                        # UPDATED UI: Explicit Override Field
+                 
                         col_q, col_msg = st.columns([1, 2])
                         new_quote = col_q.text_input("Override Price:", value=lead.get('estimated_quote'))
                         admin_msg = col_msg.text_input("Message:")
