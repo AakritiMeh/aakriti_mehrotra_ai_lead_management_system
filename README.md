@@ -6,6 +6,12 @@ This application is a full-stack AI solution built with **Streamlit** and **Groq
 
 ---
 
+## Deployed Link
+
+https://aakriti-mehrotra-ai-lead-management-system.streamlit.app/
+
+---
+
 ## 🌟 Key Features
 
 ### 👤 Customer Portal
