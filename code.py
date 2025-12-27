@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import requests
 import os
+import re 
 from datetime import datetime
 import pandas as pd
 
@@ -46,13 +47,24 @@ def authenticate_user(email, password):
 
 
 
-import re  # Add this import at the top of your file if not present
+def fallback_logic_dict(message):
+ 
+    return {
+        "intent": "WARM", 
+        "category": "GENERAL", 
+        "score": 50,
+        "reasoning": "Estimate pending site visit (AI Unavailable)", 
+        "estimated_quote": "Pending",
+        "email_subject": "Inquiry Received", 
+        "email_body": "Thank you for your inquiry. We will contact you shortly to discuss details."
+    }
 
 def classify_lead_with_ai(name, message):
+   
     url = "https://api.groq.com/openai/v1/chat/completions"
     
     if not GROQ_API_KEY or "YOUR_API_KEY" in GROQ_API_KEY:
-        return fallback_logic(message)
+        return fallback_logic_dict(message)
 
     prompt = f"""
     You are an AI Sales Engineer.
@@ -68,8 +80,8 @@ def classify_lead_with_ai(name, message):
 
     INSTRUCTIONS:
     1. Calculate cost for EACH item found.
-    2. OUTPUT RAW JSON ONLY. NO MARKDOWN. NO INTRO/OUTRO TEXT.
-    3. "reasoning" MUST be a short calculation summary (e.g. "1000sqft * 100 = 1L"). 
+    2. OUTPUT RAW JSON ONLY. DO NOT write "Here is the JSON".
+    3. "reasoning" MUST be a short calculation summary. 
     4. "estimated_quote" MUST be the final formatted string (e.g. "₹1.2 Lakhs").
 
     Return JSON:
@@ -89,30 +101,27 @@ def classify_lead_with_ai(name, message):
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
             json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
         )
-        if response.status_code != 200: return fallback_logic(message)
+        
+        if response.status_code != 200: 
+            return fallback_logic_dict(message)
         
         content = response.json()['choices'][0]['message']['content']
         
-        # --- ROBUST JSON EXTRACTION ---
-        # This regex looks for the first '{' and the last '}' and ignores everything else
+        # --- ROBUST CLEANING ---
+        # 1. Find the first '{' and the last '}'
         match = re.search(r"\{.*\}", content, re.DOTALL)
+        
         if match:
-            clean_json = match.group(0)
-            return clean_json
+            json_str = match.group(0)
+            return json.loads(json_str) 
         else:
-            # If regex fails, try basic cleanup
-            return content.replace("```json", "").replace("```", "").strip()
+            # 2. Last resort cleanup
+            clean_str = content.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean_str)
 
     except Exception as e:
-        print(f"Error: {e}") # Log error for debugging
-        return fallback_logic(message)
-
-def fallback_logic(message):
-    return json.dumps({
-        "intent": "WARM", "category": "GENERAL", "score": 50,
-        "reasoning": "Estimate pending site visit", "estimated_quote": "Pending",
-        "email_subject": "Inquiry Received", "email_body": "We will contact you shortly."
-    })
+        print(f"AI Error: {e}")
+        return fallback_logic_dict(message)
 
 
 st.set_page_config(page_title="Material AI Portal", page_icon="🏗️", layout="wide")
@@ -174,14 +183,16 @@ elif st.session_state.page == 'user_dashboard':
     st.title("👤 Customer Portal")
     tab1, tab2 = st.tabs(["📝 New Inquiry", "💬 My Quotes & Chat"])
 
-   
     with tab1:
         with st.form("new_lead"):
             message = st.text_area("Requirements", height=100)
             phone = st.text_input("Phone Number")
             if st.form_submit_button("Get Quote"):
                 with st.spinner("AI Analysis..."):
-                    ai_res = json.loads(classify_lead_with_ai(st.session_state.user['name'], message))
+                    
+               
+                    ai_res = classify_lead_with_ai(st.session_state.user['name'], message)
+                    
                     new_lead = {
                         "id": datetime.now().strftime("%Y%m%d%H%M%S"),
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -200,6 +211,7 @@ elif st.session_state.page == 'user_dashboard':
                     save_json(LEADS_DB_FILE, leads)
                     st.success("Inquiry Sent! Check 'My Quotes' tab."); st.rerun()
 
+
     with tab2:
         all_leads = load_json(LEADS_DB_FILE)
         my_leads = [l for l in all_leads if l['email'] == st.session_state.user['email']]
@@ -207,9 +219,8 @@ elif st.session_state.page == 'user_dashboard':
         if not my_leads: st.info("No active inquiries.")
         
         for lead in reversed(my_leads):
-            with st.expander(f"{lead['timestamp']} | {lead['category']}", expanded=True):
+            with st.expander(f"{lead['timestamp']} | {lead.get('category', 'General')}", expanded=True):
                 
-               
                 c_price, c_status, c_act = st.columns([1.5, 1, 1.5])
                 
                 with c_price:
@@ -237,7 +248,6 @@ elif st.session_state.page == 'user_dashboard':
                 st.divider()
                 st.subheader("💬 Message Admin")
                 
-             
                 chat_box = st.container(height=300)
                 with chat_box:
                     for msg in lead.get('chat_history', []):
@@ -246,7 +256,6 @@ elif st.session_state.page == 'user_dashboard':
                         with st.chat_message(role, avatar=av):
                             st.write(msg['content'])
 
-           
                 with st.form(key=f"user_chat_{lead['id']}", clear_on_submit=True):
                     user_msg = st.text_input("Type your message...")
                     if st.form_submit_button("Send"):
@@ -305,7 +314,6 @@ elif st.session_state.page == 'admin_dashboard':
                                 st.write(msg['content'])
 
                     with st.form(key=f"adm_reply_{lead['id']}", clear_on_submit=True):
-                 
                         col_q, col_msg = st.columns([1, 2])
                         new_quote = col_q.text_input("Override Price:", value=lead.get('estimated_quote'))
                         admin_msg = col_msg.text_input("Message:")
