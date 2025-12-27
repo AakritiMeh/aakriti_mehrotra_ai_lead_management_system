@@ -1,5 +1,3 @@
----
-
 # Material Solutions AI - Intelligent Lead Management System
 
 **A "Speed-to-Lead" AI CRM that captures, qualifies, and quotes customer inquiries instantly.**
