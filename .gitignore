@@ -1,0 +1,11 @@
+# Ignore local secrets
+.streamlit/secrets.toml
+secrets.toml
+
+# Ignore local database files (so you start fresh on cloud)
+leads_db.json
+users_db.json
+
+# Ignore system files
+__pycache__/
+*.pyc
